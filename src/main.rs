@@ -1,6 +1,6 @@
-use std::{fmt, fs, io::Write, path::PathBuf};
-
 use clap::{Parser, Subcommand, ValueEnum};
+use std::{fmt, fs, io::Write, path::PathBuf};
+use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -24,10 +24,14 @@ enum Commands {
         /// Overwrite existing files in dest directory
         #[arg(short = 'o', long = "ovr")]
         overwrite: bool,
+
+        /// Organize all files within sub directories
+        #[arg(short = 'r', long = "rec")]
+        recursive: bool,
     },
 }
 
-#[derive(Debug, Clone, ValueEnum)]
+#[derive(Debug, Clone, ValueEnum, Copy)]
 enum FileType {
     Docs,
     Image,
@@ -74,14 +78,21 @@ fn organize_files(
     path_to: &PathBuf,
     extensions: &[String],
     overwrite: &bool,
+    recursive: &bool,
     filetype_enum: FileType,
 ) -> Result<(), OrganizeError> {
-    let entries = fs::read_dir(path_from)
-        .map_err(|_| OrganizeError::SourceDirNotFound(path_from.to_path_buf()))?;
+    let max_depth = if *recursive { None } else { Some(1) };
+
+    let mut entries = WalkDir::new(path_from);
+
+    if let Some(depth) = max_depth {
+        entries = entries.max_depth(depth);
+    }
+
     let categories = filetype_enum.match_extensions();
 
     for entry in entries {
-        let entry = entry?;
+        let entry = entry.map_err(|_| OrganizeError::SourceDirNotFound(path_from.to_path_buf()))?;
         let path = entry.path();
 
         if !path.is_file() {
@@ -90,10 +101,11 @@ fn organize_files(
 
         let path_ext = path.extension().and_then(|e| e.to_str());
 
-        let allowed_file = matches!(filetype_enum, FileType::All) || path_ext.map_or(false, |ext| {
-            categories.contains(&ext)
-                && (extensions.is_empty() || extensions.iter().any(|e| e == ext))
-        });
+        let allowed_file = matches!(filetype_enum, FileType::All)
+            || path_ext.map_or(false, |ext| {
+                categories.contains(&ext)
+                    && (extensions.is_empty() || extensions.iter().any(|e| e == ext))
+            });
 
         let dst_path = path_to.join(path.file_name().unwrap());
 
@@ -145,30 +157,18 @@ fn main() {
             file_type,
             extensions,
             overwrite,
-        } => match file_type {
-            Some(FileType::Image) => {
-                if let Err(err) =
-                    organize_files(path_from, path_to, extensions, overwrite, FileType::Image)
-                {
-                    eprintln!("{}", err);
-                }
+            recursive,
+        } => {
+            let Some(file_type) = file_type else {
+                eprintln!("Invalid file type");
+                return;
+            };
+
+            if let Err(err) = organize_files(
+                path_from, path_to, extensions, overwrite, recursive, *file_type,
+            ) {
+                eprintln!("{}", err);
             }
-            Some(FileType::Docs) => {
-                if let Err(err) =
-                    organize_files(path_from, path_to, extensions, overwrite, FileType::Docs)
-                {
-                    eprintln!("{}", err);
-                }
-            }
-            Some(FileType::All) => {
-                if let Err(err) =
-                    organize_files(path_from, path_to, extensions, overwrite, FileType::All)
-                {
-                    eprintln!("{}", err);
-                }
-            }
-            // TODO: handle if no specified file type, maybe organize all files in src dir
-            None => eprintln!("Invalid file type"),
-        },
+        }
     }
 }
