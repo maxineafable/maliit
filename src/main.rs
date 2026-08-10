@@ -31,6 +31,7 @@ enum Commands {
 enum FileType {
     Docs,
     Image,
+    All,
 }
 
 impl FileType {
@@ -38,6 +39,7 @@ impl FileType {
         match self {
             Self::Image => vec!["jpg", "png", "gif", "jpeg", "webp"],
             Self::Docs => vec!["pdf", "docx", "txt"],
+            Self::All => vec![],
         }
     }
 }
@@ -52,7 +54,9 @@ enum OrganizeError {
 impl fmt::Display for OrganizeError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OrganizeError::SourceDirNotFound(src_path) => write!(f, "Source directory {} does not exist", src_path.display()),
+            OrganizeError::SourceDirNotFound(src_path) => {
+                write!(f, "Source directory {} does not exist", src_path.display())
+            }
             // OrganizeError::InvalidFileType => write!(f, "Invalid file type"),
             OrganizeError::IoErr(io_err) => write!(f, "IO error: {}", io_err),
         }
@@ -72,7 +76,8 @@ fn organize_files(
     overwrite: &bool,
     filetype_enum: FileType,
 ) -> Result<(), OrganizeError> {
-    let entries = fs::read_dir(path_from).map_err(|_| OrganizeError::SourceDirNotFound(path_from.to_path_buf()))?;
+    let entries = fs::read_dir(path_from)
+        .map_err(|_| OrganizeError::SourceDirNotFound(path_from.to_path_buf()))?;
     let categories = filetype_enum.match_extensions();
 
     for entry in entries {
@@ -85,7 +90,7 @@ fn organize_files(
 
         let path_ext = path.extension().and_then(|e| e.to_str());
 
-        let allowed_file = path_ext.map_or(false, |ext| {
+        let allowed_file = matches!(filetype_enum, FileType::All) || path_ext.map_or(false, |ext| {
             categories.contains(&ext)
                 && (extensions.is_empty() || extensions.iter().any(|e| e == ext))
         });
@@ -142,12 +147,23 @@ fn main() {
             overwrite,
         } => match file_type {
             Some(FileType::Image) => {
-                if let Err(err) = organize_files(path_from, path_to, extensions, overwrite, FileType::Image) {
+                if let Err(err) =
+                    organize_files(path_from, path_to, extensions, overwrite, FileType::Image)
+                {
                     eprintln!("{}", err);
                 }
             }
             Some(FileType::Docs) => {
-                if let Err(err) = organize_files(path_from, path_to, extensions, overwrite, FileType::Docs) {
+                if let Err(err) =
+                    organize_files(path_from, path_to, extensions, overwrite, FileType::Docs)
+                {
+                    eprintln!("{}", err);
+                }
+            }
+            Some(FileType::All) => {
+                if let Err(err) =
+                    organize_files(path_from, path_to, extensions, overwrite, FileType::All)
+                {
                     eprintln!("{}", err);
                 }
             }
